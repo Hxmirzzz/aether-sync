@@ -1,0 +1,46 @@
+# =========================
+# Seguridad y Entorno (CRÍTICO)
+# =========================
+.env
+.env.*
+!.env.example
+secrets.json
+
+# =========================
+# Python y Entornos Virtuales
+# =========================
+__pycache__/
+*.py[cod]
+*$py.class
+*.so
+venv/
+env/
+.venv/
+
+# =========================
+# Logs
+# =========================
+logs/*
+!logs/.gitkeep
+*.log
+
+# =========================
+# Pruebas y Cobertura (Pytest)
+# =========================
+.pytest_cache/
+.coverage
+htmlcov/
+.tox/
+
+# =========================
+# IDEs y Editores de Código
+# =========================
+.vscode/
+.idea/
+*.swp
+*.swo
+
+# =========================
+# Docker
+# =========================
+.dockerignore
