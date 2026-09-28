@@ -17,6 +17,27 @@ class SyncEngine:
         self.repo = Repository()
         self.batch_size = settings.BATCH_SIZE
 
+    def sync_clients(self) -> None:
+        endpoinst = self.api.get_endpoints()
+        if "clients" in endpoinst:
+            self._process_entity("Clientes", endpoinst["clients"], self.repo.upsert_clients_batch)
+        else:
+            logger.warning("Endpoint 'clients' no encontrado en el API Root.")
+
+    def sync_points(self) -> None:
+        endpoints = self.api.get_endpoints()
+        if "points" in endpoints:
+            self._process_entity("Points", endpoints["points"], self.repo.upsert_points_batch)
+        else:
+            logger.warning("Endpoint 'points' no encontrado en el API Root.")
+
+    def sync_atms(self) -> None:
+        endpoints = self.api.get_endpoints()
+        if "atms" in endpoints:
+            self._process_entity("ATMs", endpoints["atms"], self.repo.upsert_atms_batch)
+        else:
+            logger.warning("Endpoint 'atms' no encontrado en el API Root.")
+
     def run_cycle(self) -> None:
         """
         Ejecuta un ciclo completo de sincronización.
@@ -25,16 +46,9 @@ class SyncEngine:
         """
         logger.info("=== Iniciando nuevo ciclo de sincronización ===")
         try:
-            endpoints = self.api.get_endpoints()
-
-            if "clients" in endpoints:
-                self._process_entity("Clientes", endpoints["clients"], self.repo.upsert_clients_batch)
-
-            if "points" in endpoints:
-                self._process_entity("Puntos", endpoints["points"], self.repo.upsert_points_batch)
-
-            if "atms" in endpoints:
-                self._process_entity("ATMs", endpoints["atms"], self.repo.upsert_atms_batch)
+            self.sync_clients()
+            self.sync_points()
+            self.sync_atms()
 
             logger.info("=== Ciclo de sincronización finalizado exitosamente ===")
 

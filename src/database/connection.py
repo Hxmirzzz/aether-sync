@@ -15,7 +15,7 @@ class UnitOfWork:
 
     def __enter__(self):
         try:
-            self.conn = pyodbc.connect(settings.DB_CONNECTION)
+            self.conn = pyodbc.connect(settings.DB_CONNECTION_STRING)
             self.cursor = self.conn.cursor()
             self.conn.autocommit = False
 

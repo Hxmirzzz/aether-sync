@@ -18,46 +18,74 @@ BEGIN
     SET NOCOUNT ON; -- Previene el envío de mensajes de filas afectadas, mejorando el rendimiento en red
 
     BEGIN TRY
-        -- Utilizamos MERGE para realizar Upsert (Insert/Update) de forma atómica y eficiente
-        MERGE INTO dbo.Clients WITH (HOLDLOCK) AS Target
-        USING (
-            SELECT
-                @Id AS Id,
-                @ClientCode AS ClientCode,
-                @BusinessName AS BusinessName,
-                @CommercialName AS CommercialName,
-                @IdentificationType AS IdentificationType,
-                @TaxIdentification AS TaxIdentification,
-                @ClientType AS ClientType,
-                @Acronym AS Acronym,
-                @IsActive AS IsActive
-        ) AS Source
-        ON Target.tax_identification = Source.TaxIdentification
-           OR Target.client_code = Source.ClientCode -- Llaves lógicas de deduplicación
+        -- Mapeos:
+        DECLARE @TipoDocumentoId INT = 1; 
+        IF @IdentificationType = 'NIT' SET @TipoDocumentoId = 1;
+        ELSE IF @IdentificationType = 'CC' SET @TipoDocumentoId = 2;
 
-        WHEN MATCHED THEN
-            UPDATE SET
-                business_name = Source.BusinessName,
-                commercial_name = Source.CommercialName,
-                client_type = Source.ClientType,
-                is_active = Source.IsActive,
-                updated_at = GETDATE() -- Auditoría automática
+        DECLARE @TipoClienteId INT = 1;
+        DECLARE @NumericId INT = TRY_CAST(@ClientCode AS INT);
+        DECLARE @NumericDocument INT = TRY_CAST(@TaxIdentification AS INT);
+        DECLARE @CiudadDefecto INT = 11001;
+        DECLARE @Siglas VARCHAR(5) = LEFT(@Acronym, 5);
 
-        WHEN NOT MATCHED BY TARGET THEN
-            INSERT (
-                id, client_code, business_name, commercial_name,
-                identification_type, tax_identification, client_type,
-                acronym, is_active, created_at
-            )
-            VALUES (
-                Source.Id, Source.ClientCode, Source.BusinessName, Source.CommercialName,
-                Source.IdentificationType, Source.TaxIdentification, Source.ClientType,
-                Source.Acronym, Source.IsActive, GETDATE()
-            );
+        DECLARE @TargetId INT = NULL;
 
+        IF @NumericId IS NOT NULL
+            SELECT TOP 1 @TargetId = Id FROM dbo.AdmClientes WHERE NumeroDocumento = @NumericDocument;
+
+        IF @TargetId IS NULL AND @NumericId IS NOT NULL
+            SELECT TOP 1 @TargetId = Id FROM dbo.AdmClientes WHERE Id = @NumericId;
+
+        IF @TargetId IS NOT NULL
+        BEGIN
+            UPDATE dbo.AdmClientes
+            SET 
+                NombreCliente = @CommercialName,
+                RazonSocial = @BusinessName,
+                SiglasCliente = @Siglas,
+                TipoDocumento = @TipoDocumentoId,
+                NumeroDocumento = @NumericDocument,
+                TipoCliente = @TipoClienteId,
+                Estado = @IsActive
+            WHERE Id = @TargetId;
+        END
+        ELSE
+        BEGIN
+            IF @NumericId IS NOT NULL AND  @NumericId > 0
+            BEGIN
+                SET IDENTITY_INSERT dbo.AdmClientes ON;
+
+                INSERT INTO dbo.AdmClientes (
+                    Id, NombreCliente, RazonSocial, SiglasCliente, 
+                    TipoDocumento, NumeroDocumento, CiudadId, 
+                    TipoCliente, Estado
+                ) VALUES (
+                    @NumericId, @CommercialName, @BusinessName, @Siglas,
+                    @TipoDocumentoId, @NumericDocument, @CiudadDefecto,
+                    @TipoClienteId, @IsActive
+                );
+
+                SET IDENTITY_INSERT dbo.AdmClientes OFF;
+            END
+            ELSE
+            BEGIN
+                INSERT INTO dbo.AdmClientes (
+                    NombreCliente, RazonSocial, SiglasCliente, 
+                    TipoDocumento, NumeroDocumento, CiudadId, 
+                    TipoCliente, Estado
+                ) VALUES (
+                    @CommercialName, @BusinessName, @Siglas,
+                    @TipoDocumentoId, @NumericDocument, @CiudadDefecto,
+                    @TipoClienteId, @IsActive
+                );
+            END
+        END
     END TRY
     BEGIN CATCH
-        -- Lanzamos el error hacia Python para que el UnitOfWork haga el Rollback del lote
+        IF OBJECTPROPERTY(OBJECT_ID('dbo.AdmClientes'), 'TableHasIdentity') = 1
+            SET IDENTITY_INSERT dbo.AdmClientes OFF;
+
         DECLARE @ErrorMessage NVARCHAR(4000) = ERROR_MESSAGE();
         DECLARE @ErrorSeverity INT = ERROR_SEVERITY();
         DECLARE @ErrorState INT = ERROR_STATE();

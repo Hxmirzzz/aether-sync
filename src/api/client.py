@@ -54,7 +54,7 @@ class ApiClient:
         }
 
         try:
-            response = self.session.post(login_url, data=payload, timeout=10)
+            response = self.session.post(login_url, json=payload, timeout=10)
             response.raise_for_status()
 
             data = response.json()

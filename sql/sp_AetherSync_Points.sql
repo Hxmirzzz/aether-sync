@@ -14,48 +14,83 @@ BEGIN
     SET NOCOUNT ON;
 
     BEGIN TRY
-        -- Traducción de Sucursal:
-        -- Si tu BD local maneja IDs numéricos para las ciudades/sucursales,
-        -- lo resolvemos aquí en lugar de hacerlo en Python.
-        DECLARE @BranchId INT = 1; -- Valor por defecto seguro
-        IF @BranchName = 'BOGOTA' SET @BranchId = 11001;
-        ELSE IF @BranchName = 'MEDELLIN' SET @BranchId = 5001;
-        -- (Agregar aquí el resto de homologaciones necesarias)
+        -- 1. DESGLOSAR EL CÓDIGO (Ej: "88-PRA11")
+        DECLARE @DashIndex INT = CHARINDEX('-', @Code);
+        DECLARE @ClienteId INT = 0;
+        DECLARE @CodPuntoCliente NVARCHAR(255) = @Code;
 
-        MERGE INTO dbo.Points WITH (HOLDLOCK) AS Target
+        IF @DashIndex > 0
+        BEGIN
+            SET @ClienteId = TRY_CAST(SUBSTRING(@Code, 1, @DashIndex - 1) AS INT);
+            SET @CodPuntoCliente = SUBSTRING(@Code, @DashIndex + 1, LEN(@Code));
+        END
+
+        -- 2. RESOLVER LLAVES FORÁNEAS (Lookups para Sucursal y Ciudad)
+        DECLARE @SucursalId INT = 1; -- Fallback a BOGOTA
+        SELECT TOP 1 @SucursalId = Id FROM dbo.AdmSucursales WHERE NombreSucursal = @BranchName;
+
+        DECLARE @CiudadId INT = 11001; -- Fallback a BOGOTA
+        SELECT TOP 1 @CiudadId = Id FROM dbo.AdmCiudades WHERE NombreCiudad = @BranchName;
+
+        -- 3. CÁLCULO DEL CONSECUTIVO (CodPuntoVatco) PARA NUEVOS REGISTROS
+        -- Busca el valor numérico más alto para ese cliente. Si no tiene puntos, inicia en ClienteId * 10000.
+        DECLARE @NextCodPuntoVatco NVARCHAR(255);
+        SELECT @NextCodPuntoVatco = CAST(ISNULL(MAX(TRY_CAST(CodPuntoVatco AS INT)), @ClienteId * 10000) + 1 AS NVARCHAR(255))
+        FROM dbo.AdmPuntos 
+        WHERE ClienteId = @ClienteId AND TRY_CAST(CodPuntoVatco AS INT) IS NOT NULL;
+
+        -- 4. INSTRUCCIÓN MERGE
+        MERGE INTO dbo.AdmPuntos WITH (HOLDLOCK) AS Target
         USING (
-            SELECT
-                @Id AS Id,
-                @Code AS Code,
-                @Name AS Name,
-                @Address AS Address,
-                @BranchId AS BranchId
+            SELECT 
+                @Code AS CodigoPunto,
+                @ClienteId AS ClienteId,
+                @CodPuntoCliente AS CodPuntoCliente,
+                @Name AS Nombre,
+                @Address AS Direccion,
+                @SucursalId AS SucursalId,
+                @CiudadId AS CiudadId
         ) AS Source
-        ON Target.code_point = Source.Code
+        ON Target.CodigoPunto = Source.CodigoPunto
 
         WHEN MATCHED THEN
-            UPDATE SET
-                name_point = Source.Name,
-                address_point = Source.Address,
-                branch_id = Source.BranchId,
-                updated_at = GETDATE()
+            UPDATE SET 
+                NombrePunto = Source.Nombre,
+                NombreCorto = Source.Nombre,
+                PuntoFacturacion = Source.Nombre,
+                Direccion = Source.Direccion,
+                SucursalId = Source.SucursalId,
+                CiudadId = Source.CiudadId
+                -- CodPuntoVatco NO se actualiza para no alterar el consecutivo histórico
 
         WHEN NOT MATCHED BY TARGET THEN
             INSERT (
-                -- Campos dinámicos que vienen de la API
-                code_point, name_point, address_point, branch_id,
-
-                -- Campos heredados/estáticos de tu tabla local (El Modelo Estándar)
-                status, active_flag, type_id, config_code,
-                route_status, created_at
-                -- (Añadir aquí el resto de las 30+ columnas que mostraste en tu estructura)
+                CodigoPunto, CodPuntoVatco, ClienteId, CodPuntoCliente, CodClientePrincipal,
+                NombrePunto, NombreCorto, PuntoFacturacion, Direccion, Telefono,
+                Responsable, CargoResponsable, CorreoResponsable, SucursalId, CiudadId,
+                Latitud, Longitud, RadioPunto, BaseCambio, LlavesPunto, SobresPunto,
+                ChequesPunto, FondoPunto, CodigoFondo, TrasladoPunto, CoberturaPunto,
+                FechaIngreso, FechaRetiro, TipoPunto, TipoNegocio, DocumentosPunto,
+                ExistenciasPunto, PrediccionPunto, CustodiaPunto, OtrosValoresPunto,
+                Otros, LiberacionEfectivoPunto, EscalaInterurbanos, CodCas4u, NivelRiesgo,
+                CodigoRango, InfoRangoAtencion, Bateria, BateriaAtm, LocalizacionAtm,
+                EmergenciaAtm, PrimeraProvision, MarcaAtm, ModalidadAtm, SeteoId,
+                Divisa, SolicitudWsAtm, TipoAtm, PorcentajeAgotamiento, CriticidadAtm,
+                Consignacion, CodigoComposicion, Estado, CartaInclusion, RutaId, BaseCambioId
             )
             VALUES (
-                Source.Code, Source.Name, Source.Address, Source.BranchId,
-
-                -- Valores por defecto estructurales
-                'U', 1, 100, '1-9997',
-                0, GETDATE()
+                Source.CodigoPunto, @NextCodPuntoVatco, Source.ClienteId, Source.CodPuntoCliente, 0,
+                Source.Nombre, Source.Nombre, Source.Nombre, Source.Direccion, NULL,
+                NULL, NULL, NULL, Source.SucursalId, Source.CiudadId,
+                NULL, NULL, '100', 0, 0, 0,
+                0, 0, NULL, 0, 'U',
+                CAST(GETDATE() AS DATE), NULL, 0, 7, 0,
+                0, 0, 0, 0,
+                NULL, 0, 0, NULL, NULL,
+                NULL, NULL, 0, NULL, NULL,
+                0, NULL, NULL, NULL, NULL,
+                NULL, 0, NULL, NULL, NULL,
+                NULL, NULL, 1, NULL, 1, NULL -- RutaId asume un valor por defecto (1) para cumplir con el Unchecked
             );
 
     END TRY

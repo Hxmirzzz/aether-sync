@@ -16,43 +16,76 @@ BEGIN
     SET NOCOUNT ON;
 
     BEGIN TRY
-        MERGE INTO dbo.Atms WITH (HOLDLOCK) AS Target
+        -- 1. DESGLOSAR EL CÓDIGO (Ej: "1-1085")
+        DECLARE @DashIndex INT = CHARINDEX('-', @InternalCode);
+        DECLARE @ClienteId INT = TRY_CAST(@ClientCode AS INT);
+        DECLARE @CodPuntoCliente NVARCHAR(255) = @InternalCode;
+
+        IF @DashIndex > 0
+        BEGIN
+            SET @CodPuntoCliente = SUBSTRING(@InternalCode, @DashIndex + 1, LEN(@InternalCode));
+        END
+
+        IF @ClienteId IS NULL
+            SET @ClienteId = TRY_CAST(SUBSTRING(@InternalCode, 1, @DashIndex - 1) AS INT);
+
+        IF @ClienteId IS NULL 
+            SET @ClienteId = 0;
+
+        -- 2. CÁLCULO DEL CONSECUTIVO (CodPuntoVatco) PARA NUEVOS REGISTROS
+        DECLARE @NextCodPuntoVatco NVARCHAR(255);
+        SELECT @NextCodPuntoVatco = CAST(ISNULL(MAX(TRY_CAST(CodPuntoVatco AS INT)), @ClienteId * 10000) + 1 AS NVARCHAR(255))
+        FROM dbo.AdmPuntos 
+        WHERE ClienteId = @ClienteId AND TRY_CAST(CodPuntoVatco AS INT) IS NOT NULL;
+
+        -- 3. INSTRUCCIÓN MERGE APUNTANDO A AdmPuntos CON TipoPunto = 1
+        MERGE INTO dbo.AdmPuntos WITH (HOLDLOCK) AS Target
         USING (
-            SELECT
-                @Id AS Id,
-                @InternalCode AS InternalCode,
-                @ClientCode AS ClientCode,
-                @Name AS Name,
-                @Brand AS Brand,
-                @Model AS Model,
-                @ClientName AS ClientName
+            SELECT 
+                @InternalCode AS CodigoPunto,
+                @ClienteId AS ClienteId,
+                @CodPuntoCliente AS CodPuntoCliente,
+                @Name AS Nombre,
+                @Brand AS MarcaTexto,
+                @Model AS ModeloTexto
         ) AS Source
-        ON Target.internal_code = Source.InternalCode
+        ON Target.CodigoPunto = Source.CodigoPunto
 
         WHEN MATCHED THEN
-            UPDATE SET
-                name = Source.Name,
-                brand = Source.Brand,
-                model = Source.Model,
-                client_code = Source.ClientCode,
-                client_name = Source.ClientName,
-                updated_at = GETDATE()
+            UPDATE SET 
+                NombrePunto = Source.Nombre,
+                NombreCorto = Source.Nombre,
+                PuntoFacturacion = Source.Nombre,
+                Estado = 1
 
         WHEN NOT MATCHED BY TARGET THEN
             INSERT (
-                -- Campos dinámicos
-                id, internal_code, client_code, name,
-                brand, model, client_name,
-
-                -- Campos heredados/estáticos
-                is_active, installation_date, created_at
+                CodigoPunto, CodPuntoVatco, ClienteId, CodPuntoCliente, CodClientePrincipal,
+                NombrePunto, NombreCorto, PuntoFacturacion, Direccion, Telefono,
+                Responsable, CargoResponsable, CorreoResponsable, SucursalId, CiudadId,
+                Latitud, Longitud, RadioPunto, BaseCambio, LlavesPunto, SobresPunto,
+                ChequesPunto, FondoPunto, CodigoFondo, TrasladoPunto, CoberturaPunto,
+                FechaIngreso, FechaRetiro, TipoPunto, TipoNegocio, DocumentosPunto,
+                ExistenciasPunto, PrediccionPunto, CustodiaPunto, OtrosValoresPunto,
+                Otros, LiberacionEfectivoPunto, EscalaInterurbanos, CodCas4u, NivelRiesgo,
+                CodigoRango, InfoRangoAtencion, Bateria, BateriaAtm, LocalizacionAtm,
+                EmergenciaAtm, PrimeraProvision, MarcaAtm, ModalidadAtm, SeteoId,
+                Divisa, SolicitudWsAtm, TipoAtm, PorcentajeAgotamiento, CriticidadAtm,
+                Consignacion, CodigoComposicion, Estado, CartaInclusion, RutaId, BaseCambioId
             )
             VALUES (
-                Source.Id, Source.InternalCode, Source.ClientCode, Source.Name,
-                Source.Brand, Source.Model, Source.ClientName,
-
-                -- Valores por defecto
-                1, GETDATE(), GETDATE()
+                Source.CodigoPunto, @NextCodPuntoVatco, Source.ClienteId, Source.CodPuntoCliente, 0,
+                Source.Nombre, Source.Nombre, Source.Nombre, 'ATM', NULL,
+                NULL, NULL, NULL, 1, 11001, 
+                NULL, NULL, '100', 0, 0, 0,
+                0, 0, NULL, 0, 'U',
+                CAST(GETDATE() AS DATE), NULL, 1, 7, 0, 
+                0, 0, 0, 0,
+                NULL, 0, 0, NULL, NULL,
+                NULL, NULL, 0, NULL, NULL,
+                0, NULL, NULL, NULL, NULL,
+                NULL, 0, NULL, NULL, NULL,
+                NULL, NULL, 1, NULL, 1, NULL
             );
 
     END TRY
